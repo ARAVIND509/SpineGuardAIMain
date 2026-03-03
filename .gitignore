@@ -1,0 +1,14 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+.local
+/generated/prisma
+
+prisma/dev.db
+attached_assets/
+test-data/
+.env
+*.db
