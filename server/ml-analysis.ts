@@ -7,12 +7,12 @@ import type {
   HiddenAbnormalityResult,
   BloodFlowAnalysisResult
 } from "@shared/schema";
+
 import { analyzeMedicalImageWithML } from "./ml-model";
 import { generateGradCAMHeatmaps } from "./gradcam-generator";
 
 import {
   generateFinding,
-  getMaxSeverity,
   generatePostureAnalysis,
   generateSoftTissueAnalysis,
   generateHiddenAbnormalityAnalysis,
@@ -24,28 +24,44 @@ export async function analyzeWithMedicalModel(
   imageType: string,
   modelType: 'ResNet50' = 'ResNet50'
 ): Promise<AnalysisResults> {
+
   console.log(`Analyzing with ${modelType} medical model for ${imageType} scan`);
 
-  // Get ML model predictions
+  // Run ML prediction
   const mlResults = await analyzeMedicalImageWithML(imageBuffer, modelType);
 
-  // Generate Grad-CAM heatmaps ONLY for abnormal predictions above threshold
-  const abnormalPredictions = mlResults.predictions.filter(
+  const conditions = mlResults.predictions;
+
+  // Vertebra region mapping (used by 3D reconstruction)
+  const regionMap: Record<string, string> = {
+    "Disc Herniation": "L4-L5",
+    "Scoliosis": "Thoracic",
+    "Spinal Stenosis": "L3-L4",
+    "Degenerative Disc Disease": "L5-S1",
+    "Vertebral Fracture": "Lumbar",
+    "Spondylolisthesis": "L4-L5",
+    "Infection": "Lumbar",
+    "Tumor": "Thoracic"
+  };
+
+  // Generate Grad-CAM only for abnormal findings
+  const abnormalPredictions = conditions.filter(
     p => p.severity !== 'normal' && p.confidence >= 28
   );
+
   console.log(`Generating Grad-CAM heatmaps for ${abnormalPredictions.length} abnormal predictions...`);
+
   const gradCamHeatmaps = abnormalPredictions.length > 0
     ? await generateGradCAMHeatmaps(
-      imageBuffer,
-      abnormalPredictions.map(p => ({
-        ...p,
-        confidence: p.confidence
-      }))
-    )
+        imageBuffer,
+        abnormalPredictions.map(p => ({
+          ...p,
+          confidence: p.confidence
+        }))
+      )
     : [];
 
-  // Map ML predictions to diagnostic findings
-  const conditions = mlResults.predictions;
+  // Find individual disease predictions
   const discHerniation = conditions.find(c => c.condition === 'Disc Herniation');
   const scoliosis = conditions.find(c => c.condition === 'Scoliosis');
   const spinalStenosis = conditions.find(c => c.condition === 'Spinal Stenosis');
@@ -55,9 +71,46 @@ export async function analyzeWithMedicalModel(
   const infection = conditions.find(c => c.condition === 'Infection');
   const tumor = conditions.find(c => c.condition === 'Tumor');
 
+  // Determine primary abnormal condition
+  const abnormal = conditions.filter(
+    c => c.severity !== 'normal' && c.confidence >= 28
+  );
 
-  // Generate comprehensive analysis based on ML predictions
+  let primaryFinding: DiagnosticFinding | undefined = undefined;
+
+  if (abnormal.length > 0) {
+
+    const severityRank: Record<string, number> = {
+      severe: 3,
+      moderate: 2,
+      mild: 1,
+      normal: 0
+    };
+
+    const sorted = [...abnormal].sort((a, b) => {
+
+      if (severityRank[a.severity] !== severityRank[b.severity]) {
+        return severityRank[b.severity] - severityRank[a.severity];
+      }
+
+      return b.confidence - a.confidence;
+
+    });
+
+    const primary = sorted[0];
+
+    primaryFinding = {
+      condition: primary.condition,
+      severity: primary.severity,
+      confidence: primary.confidence,
+      location: regionMap[primary.condition] || "Spine"
+    };
+
+  }
+
+  // Build full analysis object
   const analysisResults: AnalysisResults = {
+
     discHerniation: generateFinding(discHerniation, "Disc Herniation"),
     scoliosis: generateFinding(scoliosis, "Scoliosis"),
     spinalStenosis: generateFinding(spinalStenosis, "Spinal Stenosis"),
@@ -67,7 +120,6 @@ export async function analyzeWithMedicalModel(
     infection: generateFinding(infection, "Infection"),
     tumor: generateFinding(tumor, "Tumor"),
 
-    // Restoring derived analysis cards
     postureSimulation: generatePostureAnalysis(conditions, imageType),
     softTissueDegeneration: generateSoftTissueAnalysis(conditions),
     hiddenAbnormality: generateHiddenAbnormalityAnalysis(conditions),
@@ -77,48 +129,30 @@ export async function analyzeWithMedicalModel(
       condition: c.condition,
       severity: c.severity,
       confidence: c.confidence,
-      location: c.condition.includes("Disc") ? "Disc" : "Spine"
+      location: regionMap[c.condition] || "Spine"
     })),
-    primaryFinding: conditions.length > 0 ? (() => {
-      // Filter to only conditions that exceed the clinical threshold
-      const abnormal = conditions.filter(
-        c => c.severity !== 'normal' && c.confidence >= 28
-      );
 
-      // TRUE NORMAL STATE — nothing significant found
-      if (abnormal.length === 0) return undefined;
+    primaryFinding: primaryFinding,
 
-      // Sort abnormal findings by severity, then confidence
-      const sorted = [...abnormal].sort((a, b) => {
-        const severityOrder: Record<string, number> = { severe: 3, moderate: 2, mild: 1, normal: 0 };
-        if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-          return severityOrder[b.severity] - severityOrder[a.severity];
-        }
-        return b.confidence - a.confidence;
-      });
-
-      const primary = sorted[0];
-      return {
-        condition: primary.condition,
-        severity: primary.severity,
-        confidence: primary.confidence,
-        location: primary.condition.includes("Disc") ? "Disc" : "Spine"
-      };
-    })() : undefined,
     mlPredictions: mlResults,
-    gradCamHeatmaps: gradCamHeatmaps.length > 0 ? gradCamHeatmaps : undefined,
+
+    gradCamHeatmaps: gradCamHeatmaps.length > 0
+      ? gradCamHeatmaps
+      : undefined,
+
     heatmapTargets: gradCamHeatmaps.length > 0
       ? gradCamHeatmaps.flatMap(h =>
-        h.affectedRegions.map(r => ({
-          condition: h.condition,
-          region: r.region,
-          intensity: r.intensity,
-          severity: h.severity || 'severe'
-        }))
-      )
-      : undefined,
+          h.affectedRegions.map(r => ({
+            condition: h.condition,
+            region: r.region,
+            intensity: r.intensity,
+            severity: h.severity || 'severe'
+          }))
+        )
+      : undefined
   };
 
   console.log(`Analysis complete with ${gradCamHeatmaps.length} Grad-CAM heatmaps generated`);
+
   return analysisResults;
 }
