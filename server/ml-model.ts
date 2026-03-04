@@ -185,7 +185,9 @@ class MedicalImageModel {
     'Tumor': (f.contrast * 0.8 + f.asym * 0.6)
   };
 
-return conditions.map((cond, index) => {
+// Step 1: calculate raw scores
+let results = conditions.map((cond, index) => {
+
   const structuralScore = structuralWeights[cond.name] || 0;
 
   const dynamicNoise =
@@ -197,20 +199,47 @@ return conditions.map((cond, index) => {
 
   const confidence = Math.round(score * 100);
 
-  let severity: 'normal' | 'mild' | 'moderate' | 'severe';
-
-  if (confidence < 30) severity = 'normal';
-  else if (confidence >= 82) severity = 'severe';
-  else if (confidence >= 60) severity = 'moderate';
-  else severity = 'mild';
-
   return {
     condition: cond.name,
     confidence,
-    severity,
-    modelType: `${modelType} v4 [Balanced Clinical Engine]`,
+    severity: 'normal' as const,
+    modelType: `${modelType} v5 [Clinical Suppression Engine]`
   };
 });
+
+
+// Step 2: sort by confidence
+const sorted = [...results].sort((a,b)=>b.confidence-a.confidence);
+
+// Step 3: get strongest disease
+const strongest = sorted[0].condition;
+
+
+// Step 4: suppress weaker diseases
+results = results.map(r => {
+
+  let adjustedConfidence = r.confidence;
+
+  if(r.condition !== strongest){
+     adjustedConfidence = Math.round(r.confidence * 0.35);
+  }
+
+  let severity: 'normal' | 'mild' | 'moderate' | 'severe';
+
+  if (adjustedConfidence < 30) severity = 'normal';
+  else if (adjustedConfidence >= 82) severity = 'severe';
+  else if (adjustedConfidence >= 60) severity = 'moderate';
+  else severity = 'mild';
+
+  return {
+    condition: r.condition,
+    confidence: adjustedConfidence,
+    severity,
+    modelType: `${modelType} v5 [Clinical Suppression Engine]`,
+  };
+});
+
+return results;
   }
 }
 
