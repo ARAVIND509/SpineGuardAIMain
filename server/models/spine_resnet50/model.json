@@ -1,11 +1,13 @@
 import * as tf from "@tensorflow/tfjs";
-import sharp from 'sharp';
-import path from 'path';
+import sharp from "sharp";
+import path from "path";
+
+type SeverityLevel = "normal" | "mild" | "moderate" | "severe";
 
 interface PredictionResult {
   condition: string;
   confidence: number;
-  severity: 'normal' | 'mild' | 'moderate' | 'severe';
+  severity: SeverityLevel;
   modelType: string;
 }
 
@@ -16,31 +18,39 @@ interface MLModelPredictions {
 }
 
 class MedicalImageModel {
+
   private model: tf.GraphModel | null = null;
-  private isLoaded = false;
+  private isLoaded: boolean = false;
 
   async initialize(): Promise<void> {
+
     if (this.isLoaded) return;
 
     try {
+
       console.log("Loading Spine AI ResNet50 model...");
 
       const modelPath = `file://${path.join(
         process.cwd(),
-        'server/models/spine_resnet50/model.json'
+        "server/models/spine_resnet50/model.json"
       )}`;
 
       this.model = await tf.loadGraphModel(modelPath);
 
       this.isLoaded = true;
+
       console.log("Spine AI model loaded successfully");
+
     } catch (error) {
+
       console.error("Model loading failed:", error);
       throw new Error("Failed to load pretrained model");
+
     }
   }
 
-  async preprocessImage(imageBuffer: Buffer): Promise<tf.Tensor4D> {
+  async preprocessImage(imageBuffer: Buffer): Promise<tf.Tensor> {
+
     const { data, info } = await sharp(imageBuffer)
       .resize(224, 224)
       .removeAlpha()
@@ -53,15 +63,18 @@ class MedicalImageModel {
     );
 
     const normalized = tensor.div(255);
-    const batched = normalized.expandDims(0) as tf.Tensor4D;
+
+    const batched = normalized.expandDims(0);
 
     tensor.dispose();
     normalized.dispose();
 
     return batched;
+
   }
 
   async predict(imageBuffer: Buffer): Promise<MLModelPredictions> {
+
     const startTime = Date.now();
 
     await this.initialize();
@@ -71,6 +84,7 @@ class MedicalImageModel {
     }
 
     try {
+
       const inputTensor = await this.preprocessImage(imageBuffer);
 
       const outputTensor = this.model.predict(inputTensor) as tf.Tensor;
@@ -92,9 +106,10 @@ class MedicalImageModel {
       ];
 
       const results: PredictionResult[] = conditions.map((condition, index) => {
+
         const confidence = Math.round((probabilities[index] ?? 0) * 100);
 
-        let severity: 'normal' | 'mild' | 'moderate' | 'severe';
+        let severity: SeverityLevel;
 
         if (confidence < 30) severity = "normal";
         else if (confidence >= 80) severity = "severe";
@@ -107,6 +122,7 @@ class MedicalImageModel {
           severity,
           modelType: "ResNet50 Medical CNN"
         };
+
       });
 
       const processingTime = Date.now() - startTime;
@@ -118,17 +134,31 @@ class MedicalImageModel {
       };
 
     } catch (error) {
+
       console.error("Prediction error:", error);
       throw new Error("AI prediction failed");
+
     }
   }
+
 }
 
 export const mlModel = new MedicalImageModel();
 
 export async function analyzeMedicalImageWithML(
   imageBuffer: Buffer,
-  modelType: 'ResNet50' | 'DenseNet121' | 'MobileNet' = 'ResNet50'
+
+
+
+
+  
+  modelType: "ResNet50" | "DenseNet121" | "MobileNet" = "ResNet50"
 ): Promise<MLModelPredictions> {
+
+
+
+
   return mlModel.predict(imageBuffer);
+
 }
+

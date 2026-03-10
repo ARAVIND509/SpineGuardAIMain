@@ -1,5 +1,6 @@
 import type {
   AnalysisResults,
+  ClinicalFinding,
   DiagnosticFinding,
   SeverityLevel,
   SoftTissueDegenerationResult,
@@ -7,6 +8,8 @@ import type {
   HiddenAbnormalityResult,
   BloodFlowAnalysisResult
 } from "@shared/schema";
+
+import { exec } from "child_process";
 
 import { analyzeMedicalImageWithML } from "./ml-model";
 import { generateGradCAMHeatmaps } from "./gradcam-generator";
@@ -27,12 +30,10 @@ export async function analyzeWithMedicalModel(
 
   console.log(`Analyzing with ${modelType} medical model for ${imageType} scan`);
 
-  // Run ML prediction
   const mlResults = await analyzeMedicalImageWithML(imageBuffer, modelType);
 
   const conditions = mlResults.predictions;
 
-  // Vertebra region mapping (used by 3D reconstruction)
   const regionMap: Record<string, string> = {
     "Disc Herniation": "L4-L5",
     "Scoliosis": "Thoracic",
@@ -44,7 +45,6 @@ export async function analyzeWithMedicalModel(
     "Tumor": "Thoracic"
   };
 
-  // Generate Grad-CAM only for abnormal findings
   const abnormalPredictions = conditions.filter(
     p => p.severity !== 'normal' && p.confidence >= 28
   );
@@ -61,7 +61,6 @@ export async function analyzeWithMedicalModel(
       )
     : [];
 
-  // Find individual disease predictions
   const discHerniation = conditions.find(c => c.condition === 'Disc Herniation');
   const scoliosis = conditions.find(c => c.condition === 'Scoliosis');
   const spinalStenosis = conditions.find(c => c.condition === 'Spinal Stenosis');
@@ -71,12 +70,11 @@ export async function analyzeWithMedicalModel(
   const infection = conditions.find(c => c.condition === 'Infection');
   const tumor = conditions.find(c => c.condition === 'Tumor');
 
-  // Determine primary abnormal condition
   const abnormal = conditions.filter(
     c => c.severity !== 'normal' && c.confidence >= 28
   );
 
-  let primaryFinding: DiagnosticFinding | undefined = undefined;
+  let primaryFinding: ClinicalFinding | undefined = undefined;
 
   if (abnormal.length > 0) {
 
@@ -108,7 +106,6 @@ export async function analyzeWithMedicalModel(
 
   }
 
-  // Build full analysis object
   const analysisResults: AnalysisResults = {
 
     discHerniation: generateFinding(discHerniation, "Disc Herniation"),
@@ -155,4 +152,34 @@ export async function analyzeWithMedicalModel(
   console.log(`Analysis complete with ${gradCamHeatmaps.length} Grad-CAM heatmaps generated`);
 
   return analysisResults;
+}
+
+export function analyzeScan(imagePath: string) {
+
+  return new Promise((resolve, reject) => {
+
+    exec(`python spine_analysis.py ${imagePath}`, (error, stdout, stderr) => {
+
+      if (error) {
+        console.error("Python error:", error);
+        reject(error);
+        return;
+      }
+
+      try {
+
+        const result = JSON.parse(stdout);
+
+        resolve(result);
+
+      } catch (err) {
+
+        reject(err);
+
+      }
+
+    });
+
+  });
+
 }
