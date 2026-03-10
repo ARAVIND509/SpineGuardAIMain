@@ -1,5 +1,11 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+/*
+  Backend API base URL
+  Change this if backend URL changes
+*/
+const API_BASE = "https://spineguard-backend.onrender.com";
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -7,12 +13,18 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+/*
+  Generic API request helper
+*/
 export async function apiRequest<T = any>(
   method: string,
   url: string,
-  data?: unknown | undefined,
+  data?: unknown
 ): Promise<T> {
-  const res = await fetch(url, {
+
+  const fullUrl = `${API_BASE}${url}`;
+
+  const res = await fetch(fullUrl, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
@@ -20,16 +32,24 @@ export async function apiRequest<T = any>(
   });
 
   await throwIfResNotOk(res);
+
   return await res.json();
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
+
+/*
+  React Query fetch function
+*/
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
+
+    const url = `${API_BASE}${queryKey.join("/")}`;
+
+    const res = await fetch(url, {
       credentials: "include",
     });
 
@@ -38,9 +58,13 @@ export const getQueryFn: <T>(options: {
     }
 
     await throwIfResNotOk(res);
+
     return await res.json();
   };
 
+/*
+  Global Query Client
+*/
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
