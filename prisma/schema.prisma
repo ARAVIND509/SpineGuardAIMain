@@ -24,7 +24,7 @@ model Scan {
   patient       Patient    @relation(fields: [patientCaseId], references: [id])
   imageUrl      String
   imageType     String
-  metadata      Json?      
+  metadata      Json?
   uploadedAt    DateTime   @default(now())
   analyses      Analysis[]
 
@@ -35,7 +35,7 @@ model Analysis {
   id         String   @id @default(uuid())
   scanId     String
   scan       Scan     @relation(fields: [scanId], references: [id])
-  results    Json     
+  results    Json
   analyzedAt DateTime @default(now())
 
   @@map("analyses")
