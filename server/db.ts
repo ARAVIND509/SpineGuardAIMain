@@ -1,9 +1,14 @@
-import "dotenv/config";
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from "@prisma/client";
 
-export const prisma = new PrismaClient();
+export const prisma = new PrismaClient({
+  log: ["query", "info", "warn", "error"],
+});
 
-// Test connection
-prisma.$connect()
-  .then(() => console.log('Successfully connected to SQLite database via Prisma'))
-  .catch((err: any) => console.error('Failed to connect to database:', err));
+export async function connectDB() {
+  try {
+    await prisma.$connect();
+    console.log("Connected to PostgreSQL via Prisma");
+  } catch (error) {
+    console.error("Database connection failed:", error);
+  }
+}
